@@ -1,94 +1,125 @@
 ﻿using System.IO.Compression;
-using System.Net;
 using System.Text;
-using System.Text.RegularExpressions;
 
 namespace FileDownload;
+
 public static class Programm
 {
     static async Task Main()
     {
         HttpClient httpClient = new HttpClient();
-        httpClient.DefaultRequestHeaders.AcceptEncoding.Add(new System.Net.Http.Headers.StringWithQualityHeaderValue("gzip"));
+        httpClient.DefaultRequestHeaders.Add("accept-encoding", "gzip");
         try
         {
-            var response = await httpClient.GetAsync("https://opencellid.org/ocid/downloads?token=pk.add17ff360f6360eb68bbd24983b7e06&type=mcc&file=257.csv.gz");
-            using var ms = new MemoryStream();
-            await response.Content.CopyToAsync(ms);
-            byte[] data;
-            data = await GZip(ms);
-            using var msData = new MemoryStream(data);
+            var response = await httpClient.GetAsync("https://opencellid.org/ocid/downloads?token=pk.ca5c8ab70ab675e44e3fdad9d63215a1&type=mcc&file=257.csv.gz");
+            using var responseStream = await response.Content.ReadAsStreamAsync();
+            using var decompressed = new GZipStream(responseStream, CompressionMode.Decompress);
 
-            string patternInt = @"^\d+$";
-            string patternFloat = @"-?\d{1,3}\.\d+";
-            using StreamReader reader = new StreamReader(msData);
-            Console.WriteLine(reader);
-            using StreamWriter writer = new StreamWriter(Environment.GetFolderPath(Environment.SpecialFolder.Desktop) + "\\Data3.csv");
+            using StreamReader reader = new StreamReader(decompressed);
+            Console.WriteLine(reader.ReadToEnd());
+            using StreamWriter writer = new StreamWriter(Environment.GetFolderPath(Environment.SpecialFolder.Desktop) + "\\Data2.csv");
             while (reader.Peek() != -1)
             {
+                bool check = true;
                 int amountElements = 1;
-                int startIndex = 0;
-                string? textLine = reader.ReadLine();
-                int index = textLine.IndexOf(',', startIndex);
-                Console.WriteLine(textLine);
-                if (index != -1)
+                var line = new StringBuilder();
+                char symbol = (char)reader.Read();
+                while (symbol != ',')
                 {
-                    if (textLine.AsSpan().Slice(startIndex, index - startIndex).ToString() != "GSM")
+                    line.Append(symbol);
+                    symbol = (char)reader.Read();
+                }
+
+                if (!line.Equals("GSM"))
+                {
+                    check = false;
+                }
+
+                line.Append(',');
+                amountElements++;
+                symbol = (char)reader.Read();
+
+                while ((amountElements == 2 || amountElements == 3 || amountElements == 4 || amountElements == 5) && check)
+                {
+                    while (symbol != ',')
+                    {
+                        if (Char.IsDigit(symbol))
+                        {
+                            line.Append(symbol);
+                            symbol = (char)reader.Read();
+                        }
+                        else
+                        {
+                            check = false;
+                        }
+                    }
+
+                    if (!check)
                     {
                         continue;
                     }
 
+                    line.Append(',');
                     amountElements++;
-                    startIndex = index + 1;
+                    symbol = (char)reader.Read();
                 }
 
-                var line = new StringBuilder();
-                bool check = true;
-                while (textLine.IndexOf(',', startIndex) != -1 && check)
+                while (symbol != ',')
                 {
-                    index = textLine.IndexOf(',', startIndex);
-                    if (amountElements == 2 || amountElements == 3 || amountElements == 4 || amountElements == 5)
+                    symbol = (char)reader.Read();
+                }
+
+                symbol = (char)reader.Read();
+                amountElements++;
+
+                while ((amountElements == 7 || amountElements == 8) && check)
+                {
+                    int dotsAmount = 0;
+                    while (symbol != ',')
                     {
-                        var world = textLine.AsSpan().Slice(startIndex, index - startIndex).ToString();
-                        if (Regex.IsMatch(world, patternInt))
+                        if (Char.IsDigit(symbol) || symbol == '.')
                         {
-                            line.Append(world);
-                            if (amountElements != 8)
+                            if (symbol == '.')
                             {
-                                line.Append(',');
+                                dotsAmount++;
                             }
+
+                            line.Append(symbol);
+                            symbol = (char)reader.Read();
                         }
                         else
                         {
                             check = false;
-                            break;
                         }
                     }
-                    else if (amountElements == 7 || amountElements == 8)
+                    if (dotsAmount != 1)
                     {
-                        var world = textLine.AsSpan().Slice(startIndex, index - startIndex).ToString();
-                        if (Regex.IsMatch(world, patternFloat))
-                        {
-                            line.Append(world);
-                            if (amountElements != 8)
-                            {
-                                line.Append(',');
-                            }
-                        }
-                        else
-                        {
-                            check = false;
-                            break;
-                        }
+                        check = false;
+                    }
+
+                    if (!check)
+                    {
+                        continue;
+                    }
+
+                    if (amountElements != 8)
+                    {
+                        line.Append(',');
                     }
 
                     amountElements++;
-                    startIndex = index + 1;
+                    symbol = (char)reader.Read();
+                }
+
+                while (symbol != '\n' && reader.Peek() != -1)
+                {
+                    symbol = (char)reader.Read();
                 }
 
                 if (check)
                 {
-                    writer.WriteLine(line);
+                    writer.Write(line);
+                    writer.Write('\n');
                 }
             }
         }
@@ -96,19 +127,6 @@ public static class Programm
         {
             Console.WriteLine(ex.Message);
             return;
-        }
-    }
-
-    private static async Task<byte[]> GZip(MemoryStream inputStream, CancellationToken cancel = default)
-    {
-        inputStream.Position = 0;
-        using (var outputStream = new MemoryStream())
-        {
-            using (var compressionStream = new GZipStream(inputStream, CompressionMode.Decompress))
-            {
-                await compressionStream.CopyToAsync(outputStream, cancel);
-            }
-            return outputStream.ToArray();
         }
     }
 }
